@@ -29,7 +29,7 @@ const BattleCharacter: React.FC<BattleCharacterProps> = ({ character, animation,
       <CharacterArt
         characterName={character.name}
         animation={animation}
-        className={`w-48 h-48 sm:w-64 sm:h-64 md:w-80 md:h-80 drop-shadow-[0_10px_15px_rgba(0,0,0,0.7)] ${animationClasses()}`}
+        className={`w-40 h-40 sm:w-56 sm:h-56 md:w-64 md:h-64 drop-shadow-[0_10px_15px_rgba(0,0,0,0.7)] ${animationClasses()}`}
       />
     </div>
   );

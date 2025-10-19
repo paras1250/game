@@ -17,9 +17,19 @@ export interface Puzzle {
   tags?: string[];
 }
 
+export interface Concept {
+  name:string;
+  description: string;
+  tags: string[];
+  lesson: string;
+}
+
+export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
+
 export enum GamePhase {
   HUB = 'HUB',
   SELECT = 'SELECT',
+  DIFFICULTY_SELECT = 'DIFFICULTY_SELECT',
   LEARNING = 'LEARNING',
   BATTLE = 'BATTLE',
   GAMEOVER = 'GAMEOVER',

@@ -4,9 +4,10 @@
  * This implementation provides the main application logic, state management,
  * and renders different game screens based on the game phase.
  */
+// FIX: Import useState, useEffect, and useCallback from React to resolve multiple "Cannot find name" errors.
 import React, { useState, useEffect, useCallback } from 'react';
 import { CHARACTERS, PUZZLES, GAME_CONSTANTS, CONCEPTS } from './constants';
-import type { Character, Puzzle } from './types';
+import type { Character, Puzzle, Concept, Difficulty } from './types';
 import { GamePhase, AnimationState, SoundType } from './types';
 import CharacterCard from './components/CharacterCard';
 import TrainingArena from './components/TrainingArena';
@@ -14,8 +15,9 @@ import BattleCharacter from './components/BattleCharacter';
 import HealthBar from './components/HealthBar';
 import CodingChallengeModal from './components/CodingChallengeModal';
 import PuzzleResultModal from './components/PuzzleResultModal';
-import { soundService } from './services/soundService';
+import { audioService } from './services/audioService';
 import IntroAnimation from './components/IntroAnimation';
+import BuggyEffectOverlay from './components/BuggyEffectOverlay';
 
 const HomeScreenBackground = () => (
     <>
@@ -123,7 +125,7 @@ const BattleBackground = () => (
 const HexPlatform: React.FC<{ color: string }> = ({ color }) => {
     const gradientId = `grad-${color.replace('#', '')}`;
     return (
-        <div className="absolute -bottom-4 w-64 h-32" style={{ filter: `drop-shadow(0 0 25px ${color})`}}>
+        <div className="absolute -bottom-2 md:-bottom-4 w-48 h-24 md:w-64 md:h-32" style={{ filter: `drop-shadow(0 0 15px ${color})`}}>
             <svg viewBox="0 0 120 104" className="w-full h-full">
                 <defs>
                     <radialGradient id={gradientId} cx="50%" cy="50%" r="70%">
@@ -155,7 +157,27 @@ const App: React.FC = () => {
     const [gamePhase, setGamePhase] = useState<GamePhase>(GamePhase.HUB);
     const [player, setPlayer] = useState<Character | null>(null);
     const [opponent, setOpponent] = useState<Character | null>(null);
-    const [selectedConcept, setSelectedConcept] = useState<{name: string, tags: string[]}|null>(null);
+    const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
+    const [selectedConcept, setSelectedConcept] = useState<Concept|null>(null);
+    const [solvedPuzzleIds, setSolvedPuzzleIds] = useState<Set<number>>(() => {
+        try {
+            const item = window.localStorage.getItem('solvedPuzzleIds');
+            // Convert array back to Set
+            return item ? new Set(JSON.parse(item)) : new Set();
+        } catch (error) {
+            console.error("Error reading solved puzzle IDs from localStorage", error);
+            return new Set();
+        }
+    });
+
+    useEffect(() => {
+        try {
+            // Convert Set to array for JSON serialization
+            window.localStorage.setItem('solvedPuzzleIds', JSON.stringify(Array.from(solvedPuzzleIds)));
+        } catch (error) {
+            console.error("Error saving solved puzzle IDs to localStorage", error);
+        }
+    }, [solvedPuzzleIds]);
 
     const [playerHealth, setPlayerHealth] = useState(GAME_CONSTANTS.PLAYER_MAX_HEALTH);
     const [opponentHealth, setOpponentHealth] = useState(GAME_CONSTANTS.OPPONENT_MAX_HEALTH);
@@ -166,7 +188,8 @@ const App: React.FC = () => {
     const [isPlayerTurn, setIsPlayerTurn] = useState(true);
     const [turnMessage, setTurnMessage] = useState('');
     const [isMuted, setIsMuted] = useState(false);
-    const [showConcepts, setShowConcepts] = useState(false);
+    const [showLearningPath, setShowLearningPath] = useState(false);
+    const [showBuggyEffect, setShowBuggyEffect] = useState(false);
 
     const getPuzzlesForCharacter = useCallback((character: Character | null) => {
         if (!character) return [];
@@ -193,16 +216,28 @@ const App: React.FC = () => {
        return PUZZLES.filter(p => p.tags?.some(t => conceptTags.includes(t)));
     }, []);
 
-    const handleStartLearning = (concept: {name: string, tags: string[]}) => {
-        soundService.playSound(SoundType.ENTER_TRAINING);
+    const markPuzzleAsSolved = useCallback((puzzleId: number) => {
+        setSolvedPuzzleIds(prev => new Set(prev).add(puzzleId));
+    }, []);
+
+    const handleStartLearning = (concept: Concept) => {
+        audioService.playSound(SoundType.ENTER_TRAINING);
         setSelectedConcept(concept);
         setGamePhase(GamePhase.LEARNING);
     };
 
     const handleBattle = (character: Character) => {
-        soundService.playSound(SoundType.SELECT_CHAR);
+        audioService.playSound(SoundType.SELECT_CHAR);
         setPlayer(character);
-        const availableOpponents = CHARACTERS.filter(c => c.id !== character.id);
+        setGamePhase(GamePhase.DIFFICULTY_SELECT);
+    };
+    
+    const handleStartBattle = (selectedDifficulty: Difficulty) => {
+        if (!player) return;
+        audioService.playSound(SoundType.CLICK);
+        setDifficulty(selectedDifficulty);
+
+        const availableOpponents = CHARACTERS.filter(c => c.id !== player.id);
         const randomOpponent = availableOpponents[Math.floor(Math.random() * availableOpponents.length)];
         setOpponent(randomOpponent);
 
@@ -211,7 +246,7 @@ const App: React.FC = () => {
         setPlayerAnimation(AnimationState.INTRO);
         setOpponentAnimation(AnimationState.INTRO);
         setIsPlayerTurn(true);
-        setTurnMessage(`${character.name}, prepare for battle!`);
+        setTurnMessage(`${player.name}, prepare for a practice match!`);
         setGamePhase(GamePhase.BATTLE);
 
         setTimeout(() => {
@@ -222,45 +257,49 @@ const App: React.FC = () => {
     };
 
     const handleExitLearning = () => {
-        soundService.playSound(SoundType.CLICK);
+        audioService.playSound(SoundType.CLICK);
         setGamePhase(GamePhase.HUB);
-        setShowConcepts(true);
+        setShowLearningPath(true);
         setSelectedConcept(null);
     };
 
     const resetGame = useCallback(() => {
-        soundService.stopBackgroundMusic();
+        audioService.stopBackgroundMusic();
         setGamePhase(GamePhase.HUB);
         setPlayer(null);
         setOpponent(null);
         setFailedPuzzle(null);
         setCurrentPuzzle(null);
-        setShowConcepts(false);
+        setShowLearningPath(false);
     }, []);
 
     const handleReturnToHub = () => {
-        soundService.playSound(SoundType.CLICK);
+        audioService.playSound(SoundType.CLICK);
         resetGame();
     };
     
     const startPlayerAttack = () => {
         if (!isPlayerTurn || !player || gamePhase !== GamePhase.BATTLE) return;
-        soundService.playSound(SoundType.CLICK);
+        audioService.playSound(SoundType.CLICK);
         const puzzles = getPuzzlesForCharacter(player);
         const randomPuzzle = puzzles[Math.floor(Math.random() * puzzles.length)];
         setCurrentPuzzle(randomPuzzle);
     };
 
     const handleSolvePuzzle = () => {
-        soundService.playSound(SoundType.SUCCESS);
+        audioService.playSound(SoundType.SUCCESS);
+        if (currentPuzzle) {
+            markPuzzleAsSolved(currentPuzzle.id);
+        }
         setCurrentPuzzle(null);
         setPlayerAnimation(AnimationState.ATTACKING);
+        setTurnMessage(`${player?.name} unleashes a power move!`);
 
         setTimeout(() => {
             const damage = GAME_CONSTANTS.BASE_ATTACK_DAMAGE + (Math.random() * GAME_CONSTANTS.POWER_ATTACK_BONUS);
             setOpponentHealth(prev => Math.max(0, prev - damage));
             setOpponentAnimation(AnimationState.HIT);
-            soundService.playSound(SoundType.OPPONENT_HIT);
+            audioService.playSound(SoundType.OPPONENT_HIT);
 
             setTimeout(() => {
                 setPlayerAnimation(AnimationState.IDLE);
@@ -273,85 +312,98 @@ const App: React.FC = () => {
     };
 
     const handleFailPuzzle = () => {
-        soundService.playSound(SoundType.FAIL);
+        audioService.playSound(SoundType.FAIL);
+        setShowBuggyEffect(true);
+        setTimeout(() => setShowBuggyEffect(false), 2500);
+
         if (currentPuzzle) {
             setFailedPuzzle(currentPuzzle);
         }
         setCurrentPuzzle(null);
+        setTurnMessage(`${player?.name}'s code has a bug!`);
 
-        // Player takes damage for failing
+        const failDamage = GAME_CONSTANTS.FAIL_DAMAGE[difficulty];
         setPlayerAnimation(AnimationState.HIT);
-        soundService.playSound(SoundType.PLAYER_HIT);
-        setPlayerHealth(prev => Math.max(0, prev - GAME_CONSTANTS.FAIL_DAMAGE));
+        audioService.playSound(SoundType.PLAYER_HIT);
+        setPlayerHealth(prev => Math.max(0, prev - failDamage));
 
         setTimeout(() => {
             setPlayerAnimation(AnimationState.IDLE);
-            if (playerHealth - GAME_CONSTANTS.FAIL_DAMAGE > 0) {
+            if (playerHealth - failDamage > 0) {
                  setIsPlayerTurn(false);
             }
         }, 500);
     };
     
     const handleToggleMute = () => {
-        setIsMuted(soundService.toggleMute());
+        setIsMuted(audioService.toggleMute());
     };
 
     // Background Music Controller
     useEffect(() => {
         if (gamePhase === GamePhase.BATTLE) {
-            soundService.playBackgroundMusic();
+            audioService.playBackgroundMusic();
         } else {
-            soundService.stopBackgroundMusic();
+            audioService.stopBackgroundMusic();
         }
         return () => {
-            soundService.stopBackgroundMusic();
+            audioService.stopBackgroundMusic();
         };
     }, [gamePhase]);
 
 
     // Opponent's turn logic
     useEffect(() => {
-        if (gamePhase === GamePhase.BATTLE && !isPlayerTurn && opponentHealth > 0 && playerHealth > 0) {
-            setTurnMessage(`${opponent?.name} is preparing an attack...`);
-            const opponentTurnTimeout = setTimeout(() => {
-                setOpponentAnimation(AnimationState.ATTACKING);
-                soundService.playSound(SoundType.ATTACK);
-                
-                setTimeout(() => {
-                    const damage = GAME_CONSTANTS.OPPONENT_ATTACK_DAMAGE;
-                    setPlayerHealth(prev => Math.max(0, prev - damage));
-                    setPlayerAnimation(AnimationState.HIT);
-                    soundService.playSound(SoundType.PLAYER_HIT);
+        if (gamePhase === GamePhase.BATTLE && !isPlayerTurn && opponentHealth > 0 && playerHealth > 0 && player && opponent) {
+            const opponentTurnTimeout = setTimeout(async () => {
+                const taunt = await audioService.getBanter(opponent, player, 'taunt');
+                setTurnMessage(`"${taunt}"`);
 
+                setTimeout(() => {
+                    setOpponentAnimation(AnimationState.ATTACKING);
+                    audioService.playSound(SoundType.ATTACK);
+                    
                     setTimeout(() => {
-                        setOpponentAnimation(AnimationState.IDLE);
-                        setPlayerAnimation(AnimationState.IDLE);
-                        setIsPlayerTurn(true);
-                        setTurnMessage("Your turn to attack!");
-                    }, 500);
-                }, 1000);
-            }, GAME_CONSTANTS.OPPONENT_TURN_DELAY_MS);
+                        const damage = GAME_CONSTANTS.OPPONENT_ATTACK_DAMAGE[difficulty];
+                        setPlayerHealth(prev => Math.max(0, prev - damage));
+                        setPlayerAnimation(AnimationState.HIT);
+                        audioService.playSound(SoundType.PLAYER_HIT);
+
+                        setTimeout(() => {
+                            setOpponentAnimation(AnimationState.IDLE);
+                            setPlayerAnimation(AnimationState.IDLE);
+                            setIsPlayerTurn(true);
+                            setTurnMessage("Your turn to attack!");
+                        }, 500);
+                    }, 1000);
+                }, 2000); // Wait for user to read taunt
+            }, 1000);
 
             return () => clearTimeout(opponentTurnTimeout);
         }
-    }, [isPlayerTurn, gamePhase, opponent, opponentHealth, playerHealth]);
+    }, [isPlayerTurn, gamePhase, opponent, opponentHealth, playerHealth, player, difficulty]);
     
     // Check for game over
     useEffect(() => {
-        if ((playerHealth <= 0 || opponentHealth <= 0) && gamePhase === GamePhase.BATTLE) {
-            setGamePhase(GamePhase.GAMEOVER);
-            if (playerHealth <= 0) {
-                setPlayerAnimation(AnimationState.LOSE);
-                setOpponentAnimation(AnimationState.WIN);
-                setTurnMessage(`${opponent?.name} is victorious!`);
-                soundService.playSound(SoundType.LOSE);
-            } else {
-                setPlayerAnimation(AnimationState.WIN);
-                setOpponentAnimation(AnimationState.LOSE);
-                setTurnMessage(`${player?.name} is victorious!`);
-                soundService.playSound(SoundType.WIN);
+        const handleGameOver = async () => {
+            if ((playerHealth <= 0 || opponentHealth <= 0) && gamePhase === GamePhase.BATTLE && player && opponent) {
+                setGamePhase(GamePhase.GAMEOVER);
+                if (playerHealth <= 0) {
+                    setPlayerAnimation(AnimationState.LOSE);
+                    setOpponentAnimation(AnimationState.WIN);
+                    const victoryQuote = await audioService.getBanter(opponent, player, 'victory');
+                    setTurnMessage(`"${victoryQuote}"`);
+                    audioService.playSound(SoundType.LOSE);
+                } else {
+                    setPlayerAnimation(AnimationState.WIN);
+                    setOpponentAnimation(AnimationState.LOSE);
+                    const victoryQuote = await audioService.getBanter(player, opponent, 'victory');
+                    setTurnMessage(`"${victoryQuote}"`);
+                    audioService.playSound(SoundType.WIN);
+                }
             }
-        }
+        };
+        handleGameOver();
     }, [playerHealth, opponentHealth, gamePhase, player, opponent]);
 
     if (isIntro) {
@@ -361,32 +413,37 @@ const App: React.FC = () => {
     const renderContent = () => {
         if (gamePhase === GamePhase.HUB) {
              return (
-                <div className="text-center">
+                <div className="text-center p-4">
                     <h1 className="text-5xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-yellow-400">Code Clash</h1>
                     <h2 className="text-2xl text-gray-300 mb-8">Learn to Code by Fighting with Logic</h2>
-                     {!showConcepts ? (
-                        <div className="flex flex-col md:flex-row gap-6 items-center justify-center">
-                            <button onClick={() => { soundService.playSound(SoundType.CLICK); setShowConcepts(true); }} className="px-10 py-5 text-2xl font-bold text-white bg-cyan-600 rounded-lg shadow-[0_0_20px_rgba(34,211,238,0.7)] hover:bg-cyan-500 transition-all duration-300 transform hover:scale-105">
-                                Learn Concepts
+                     {!showLearningPath ? (
+                        <div className="flex flex-col sm:flex-row gap-6 items-center justify-center">
+                            <button onClick={() => { audioService.playSound(SoundType.CLICK); setShowLearningPath(true); }} className="px-8 py-4 md:px-10 md:py-5 text-xl md:text-2xl font-bold text-white bg-cyan-600 rounded-lg shadow-[0_0_20px_rgba(34,211,238,0.7)] hover:bg-cyan-500 transition-all duration-300 transform hover:scale-105">
+                                Learning Path
                             </button>
-                             <button onClick={() => { soundService.playSound(SoundType.CLICK); setGamePhase(GamePhase.SELECT); }} className="px-10 py-5 text-2xl font-bold text-white bg-red-600 rounded-lg shadow-[0_0_20px_rgba(239,68,68,0.7)] hover:bg-red-500 transition-all duration-300 transform hover:scale-105">
-                                Challenge Mode
+                             <button onClick={() => { audioService.playSound(SoundType.CLICK); setGamePhase(GamePhase.SELECT); }} className="px-8 py-4 md:px-10 md:py-5 text-xl md:text-2xl font-bold text-white bg-red-600 rounded-lg shadow-[0_0_20px_rgba(239,68,68,0.7)] hover:bg-red-500 transition-all duration-300 transform hover:scale-105">
+                                Practice Arena
                             </button>
                         </div>
                     ) : (
                         <div className="relative glowing-border p-1 max-w-4xl mx-auto">
                            <div className="bg-black/60 rounded-lg p-6">
-                            <h3 className="text-3xl font-bold text-cyan-300 mb-6">Choose a Concept to Master</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {CONCEPTS.map(concept => (
-                                    <div key={concept.name} onClick={() => handleStartLearning(concept)}
-                                        className="bg-gray-800/70 p-4 rounded-lg border-2 border-cyan-700 hover:bg-cyan-900/50 hover:border-cyan-400 cursor-pointer transition-all duration-300 transform hover:-translate-y-1">
-                                        <h4 className="text-xl font-bold text-cyan-400">{concept.name}</h4>
-                                        <p className="text-gray-400">{concept.description}</p>
-                                    </div>
+                            <h3 className="text-3xl font-bold text-cyan-300 mb-6">Your Coding Journey</h3>
+                            <div className="flex flex-col items-center gap-2">
+                                {CONCEPTS.map((concept, index) => (
+                                    <React.Fragment key={concept.name}>
+                                        <div onClick={() => handleStartLearning(concept)}
+                                            className="w-full bg-gray-800/70 p-4 rounded-lg border-2 border-cyan-700 hover:bg-cyan-900/50 hover:border-cyan-400 cursor-pointer transition-all duration-300 transform hover:-translate-y-1 text-left">
+                                            <h4 className="text-xl font-bold text-cyan-400">{index + 1}. {concept.name}</h4>
+                                            <p className="text-gray-400">{concept.description}</p>
+                                        </div>
+                                        {index < CONCEPTS.length - 1 && (
+                                            <div className="h-6 w-1 bg-cyan-700/50"></div>
+                                        )}
+                                    </React.Fragment>
                                 ))}
                             </div>
-                            <button onClick={() => { soundService.playSound(SoundType.CLICK); setShowConcepts(false); }} className="mt-6 px-6 py-2 text-lg font-bold text-white bg-gray-600 rounded-lg hover:bg-gray-700">Back</button>
+                            <button onClick={() => { audioService.playSound(SoundType.CLICK); setShowLearningPath(false); }} className="mt-6 px-6 py-2 text-lg font-bold text-white bg-gray-600 rounded-lg hover:bg-gray-700">Back</button>
                            </div>
                         </div>
                     )}
@@ -396,31 +453,115 @@ const App: React.FC = () => {
 
         if (gamePhase === GamePhase.SELECT) {
             return (
-                <div className="text-center">
-                    <h1 className="text-4xl font-bold mb-2 text-red-400">Challenge Mode</h1>
-                    <h2 className="text-2xl text-gray-300 mb-6">Choose Your Champion</h2>
-                    <div className="relative glowing-border p-1 max-w-7xl mx-auto">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 px-4 py-8 bg-black/60 rounded-lg">
-                            {CHARACTERS.map(char => (
-                                <CharacterCard 
-                                    key={char.id} 
-                                    character={char} 
-                                    onBattle={handleBattle}
-                                />
-                            ))}
+                <>
+                    <style>{`
+                        @keyframes rotate-border {
+                            from { transform: rotate(0deg); opacity: 0.7; }
+                            50% { opacity: 1; }
+                            to { transform: rotate(360deg); opacity: 0.7; }
+                        }
+                        .glowing-container-wrap {
+                            position: relative;
+                            padding: 3px;
+                            border-radius: 0.75rem; /* rounded-xl */
+                            overflow: hidden;
+                            z-index: 0;
+                        }
+                        .glowing-container-wrap::after {
+                            content: '';
+                            position: absolute;
+                            inset: -200%;
+                            background: conic-gradient(from 0deg, #d946ef, #8b5cf6, #22d3ee, #34d399, #d946ef);
+                            animation: rotate-border 8s linear infinite;
+                            filter: blur(25px);
+                            z-index: -2;
+                        }
+                        .glowing-container-wrap::before {
+                            content: '';
+                            position: absolute;
+                            inset: -200%;
+                            background: conic-gradient(from 0deg, #d946ef, #8b5cf6, #22d3ee, #34d399, #d946ef);
+                            animation: rotate-border 8s linear infinite;
+                            z-index: -1;
+                        }
+                        .glowing-container-content {
+                            background-color: rgba(2, 6, 23, 0.7);
+                            background-image: 
+                                radial-gradient(ellipse at center, transparent 50%, rgba(2, 6, 23, 0.8) 100%),
+                                linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+                            background-size: 100% 100%, 100% 3px;
+                            animation: subtle-scanline 12s linear infinite;
+                            backdrop-filter: blur(5px);
+                            border-radius: 0.6rem; /* Slightly smaller than wrapper */
+                            position: relative;
+                            z-index: 1;
+                        }
+                         @keyframes subtle-scanline {
+                            from { background-position: 0 0; }
+                            to { background-position: 0 -100px; }
+                        }
+                    `}</style>
+                    <div className="text-center w-full">
+                        <h1 className="text-4xl font-bold mb-2 text-red-400">Practice Arena</h1>
+                        <h2 className="text-2xl text-gray-300 mb-6">Choose Your Champion to Spar</h2>
+                        <div className="max-w-7xl mx-auto">
+                            <div className="glowing-container-wrap">
+                                <div className="glowing-container-content">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 px-4 py-8">
+                                        {CHARACTERS.map(char => (
+                                            <CharacterCard 
+                                                key={char.id} 
+                                                character={char} 
+                                                onBattle={handleBattle}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                         <button onClick={handleReturnToHub} className="mt-8 px-6 py-2 text-lg font-bold text-white bg-gray-600 rounded-lg hover:bg-gray-700">Back to Hub</button>
+                    </div>
+                </>
+            );
+        }
+        
+        if (gamePhase === GamePhase.DIFFICULTY_SELECT) {
+            return (
+                 <div className="text-center w-full">
+                    <h1 className="text-4xl font-bold mb-2 text-yellow-400">Select Difficulty</h1>
+                    <h2 className="text-2xl text-gray-300 mb-8">Choose your challenge level.</h2>
+                    <div className="relative glowing-border p-1 max-w-4xl mx-auto">
+                        <div className="bg-black/60 rounded-lg p-6 md:p-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+                             {/* Easy */}
+                             <div onClick={() => handleStartBattle('EASY')} className="p-6 bg-green-900/50 rounded-lg border-2 border-green-500 hover:bg-green-800/50 hover:border-green-400 cursor-pointer transition-all transform hover:scale-105">
+                                 <h3 className="text-2xl md:text-3xl font-bold text-green-400">EASY</h3>
+                                 <p className="mt-2 text-gray-300">Longer timer, easier hints, and less opponent damage. Perfect for learning.</p>
+                             </div>
+                             {/* Medium */}
+                             <div onClick={() => handleStartBattle('MEDIUM')} className="p-6 bg-yellow-900/50 rounded-lg border-2 border-yellow-500 hover:bg-yellow-800/50 hover:border-yellow-400 cursor-pointer transition-all transform hover:scale-105">
+                                 <h3 className="text-2xl md:text-3xl font-bold text-yellow-400">MEDIUM</h3>
+                                 <p className="mt-2 text-gray-300">The standard experience. Balanced timer, hints, and damage.</p>
+                             </div>
+                             {/* Hard */}
+                             <div onClick={() => handleStartBattle('HARD')} className="p-6 bg-red-900/50 rounded-lg border-2 border-red-500 hover:bg-red-800/50 hover:border-red-400 cursor-pointer transition-all transform hover:scale-105">
+                                 <h3 className="text-2xl md:text-3xl font-bold text-red-400">HARD</h3>
+                                 <p className="mt-2 text-gray-300">Shorter timer, cryptic hints, and tougher opponents. For seasoned coders.</p>
+                             </div>
                         </div>
                     </div>
-                     <button onClick={handleReturnToHub} className="mt-8 px-6 py-2 text-lg font-bold text-white bg-gray-600 rounded-lg hover:bg-gray-700">Back to Hub</button>
-                </div>
+                    <button onClick={() => setGamePhase(GamePhase.SELECT)} className="mt-8 px-6 py-2 text-lg font-bold text-white bg-gray-600 rounded-lg hover:bg-gray-700">Back to Character Select</button>
+                 </div>
             );
         }
 
         if (gamePhase === GamePhase.LEARNING && selectedConcept) {
             return (
                 <TrainingArena 
-                    conceptName={selectedConcept.name}
+                    concept={selectedConcept}
                     puzzles={getPuzzlesForConcept(selectedConcept.tags)} 
                     onExit={handleExitLearning} 
+                    solvedPuzzleIds={solvedPuzzleIds}
+                    onPuzzleSolved={markPuzzleAsSolved}
                 />
             );
         }
@@ -429,8 +570,9 @@ const App: React.FC = () => {
              const platformColor = (character: Character) => colorMap[character.color] || '#ffffff';
             return (
                 <div className="flex flex-col h-full w-full relative z-10">
-                    {currentPuzzle && <CodingChallengeModal puzzle={currentPuzzle} onSolve={handleSolvePuzzle} onFail={handleFailPuzzle} />}
+                    {currentPuzzle && <CodingChallengeModal puzzle={currentPuzzle} onSolve={handleSolvePuzzle} onFail={handleFailPuzzle} solvedPuzzleIds={solvedPuzzleIds} difficulty={difficulty} />}
                     {failedPuzzle && <PuzzleResultModal puzzle={failedPuzzle} onDismiss={() => setFailedPuzzle(null)} />}
+                    {showBuggyEffect && <BuggyEffectOverlay />}
                     
                     <div className="absolute top-4 left-4 right-4 flex justify-between z-30">
                        <button onClick={handleReturnToHub} className="px-4 py-2 text-sm font-bold text-white bg-red-600/80 rounded-lg hover:bg-red-700/80 backdrop-blur-sm transition-colors">
@@ -438,104 +580,80 @@ const App: React.FC = () => {
                        </button>
                        <button onClick={handleToggleMute} className="px-3 py-2 text-sm font-bold text-white bg-blue-600/80 rounded-lg hover:bg-blue-700/80 backdrop-blur-sm transition-colors">
                            {isMuted ? 
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                           : 
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                             <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clipRule="evenodd" />
-                           </svg>}
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.093.707z" clipRule="evenodd" /></svg>
+                           : <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.093.707zm5.828 9.9a1 1 0 01-1.414-1.414L15.586 10l-1.79-1.79a1 1 0 011.413-1.414L17 8.586l1.79-1.79a1 1 0 011.414 1.414L18.414 10l1.79 1.79a1 1 0 01-1.414 1.414L17 11.414l-1.79 1.79z" clipRule="evenodd" /></svg>
+                           }
                        </button>
                     </div>
 
-                    <div className="flex-1 flex flex-col justify-around pt-12 px-4">
-                        {/* Opponent Info */}
-                        <div className="flex flex-col items-center">
-                             <div className="w-full max-w-sm text-center">
-                                <h2 className="text-center text-2xl font-bold mb-2" style={{ color: colorMap[opponent.color], textShadow: '2px 2px 4px rgba(0,0,0,0.7)' }}>{opponent.name}</h2>
-                                <HealthBar health={opponentHealth} maxHealth={GAME_CONSTANTS.OPPONENT_MAX_HEALTH} color="bg-red-500" />
+                    <div className="flex-1 w-full flex flex-col md:flex-row justify-around items-center px-2 md:px-8 gap-8 md:gap-0">
+                        {/* Player */}
+                        <div className="flex flex-col items-center relative">
+                             <h2 className="text-2xl md:text-3xl font-bold mb-2 text-cyan-300" style={{ textShadow: '0 0 8px #22d3ee' }}>{player.name}</h2>
+                             <div className="w-64 md:w-80"><HealthBar health={playerHealth} maxHealth={GAME_CONSTANTS.PLAYER_MAX_HEALTH} color="bg-green-500" /></div>
+                             <div className="mt-4 relative flex items-center justify-center">
+                                <BattleCharacter character={player} animation={playerAnimation} />
+                                <HexPlatform color={platformColor(player)} />
                              </div>
                         </div>
-
-                        {/* Arena */}
-                        <div className="relative flex items-center justify-around w-full h-80">
-                            <div className="relative flex flex-col items-center justify-center h-full">
-                               <BattleCharacter character={player} animation={playerAnimation} />
-                               <HexPlatform color={platformColor(player)} />
-                            </div>
-                             <div className="relative flex flex-col items-center justify-center h-full">
+                        {/* Opponent */}
+                        <div className="flex flex-col items-center relative">
+                             <h2 className="text-2xl md:text-3xl font-bold mb-2 text-red-400" style={{ textShadow: '0 0 8px #ef4444' }}>{opponent.name}</h2>
+                             <div className="w-64 md:w-80"><HealthBar health={opponentHealth} maxHealth={GAME_CONSTANTS.OPPONENT_MAX_HEALTH} color="bg-red-500" /></div>
+                             <div className="mt-4 relative flex items-center justify-center">
                                 <BattleCharacter character={opponent} animation={opponentAnimation} isOpponent />
                                 <HexPlatform color={platformColor(opponent)} />
-                            </div>
-                        </div>
-
-                        {/* Player UI */}
-                        <div className="flex flex-col items-center">
-                           <div className="w-full max-w-sm text-center mb-4">
-                               <h2 className="text-2xl font-bold mb-2 mt-4" style={{ color: colorMap[player.color], textShadow: '2px 2px 4px rgba(0,0,0,0.7)' }}>{player.name}</h2>
-                               <HealthBar health={playerHealth} maxHealth={GAME_CONSTANTS.PLAYER_MAX_HEALTH} color="bg-green-500" />
-                            </div>
-                            <div className="text-center min-h-[6rem] flex flex-col justify-center items-center">
-                                <p className="text-xl text-yellow-300 font-mono mb-4">{turnMessage}</p>
-                                {gamePhase === GamePhase.BATTLE && (
-                                    <button
-                                        onClick={startPlayerAttack}
-                                        disabled={!isPlayerTurn}
-                                        className="px-8 py-3 text-xl font-bold text-white bg-blue-600 rounded-lg shadow-[0_0_15px_rgba(59,130,246,0.8)] hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-600 disabled:shadow-none disabled:cursor-not-allowed"
-                                    >
-                                        Attack()
-                                    </button>
-                                )}
-                                {gamePhase === GamePhase.GAMEOVER && (
-                                     <button onClick={handleReturnToHub} className="mt-4 px-6 py-2 text-lg font-bold text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700">Play Again</button>
-                                )}
-                            </div>
+                             </div>
                         </div>
                     </div>
+
+                    <div className="relative z-20 pb-4 w-full">
+                        <div className="max-w-md md:max-w-3xl mx-auto bg-black/50 backdrop-blur-sm border-2 border-gray-600/70 p-3 rounded-xl shadow-lg w-full">
+                           <div className="h-20 flex flex-col items-center justify-center text-center px-4">
+                             <p className="text-lg md:text-xl font-bold text-yellow-300 mb-2">{turnMessage}</p>
+                             {isPlayerTurn && gamePhase === GamePhase.BATTLE && (
+                                 <button onClick={startPlayerAttack} className="px-6 py-2 font-bold text-white bg-red-600 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.8)] hover:bg-red-500 transition-all duration-300 transform hover:scale-105">
+                                     Attack()
+                                 </button>
+                             )}
+                             {gamePhase === GamePhase.GAMEOVER && (
+                                 <button onClick={handleReturnToHub} className="px-6 py-2 font-bold text-white bg-blue-600 rounded-lg shadow-[0_0_15px_rgba(59,130,246,0.8)] hover:bg-blue-700 transition-all duration-300 transform hover:scale-105">
+                                     Back to Hub
+                                 </button>
+                             )}
+                           </div>
+                        </div>
+                    </div>
+
                 </div>
             );
         }
 
-        return null;
+        return <div className="text-white">Loading...</div>; // Fallback
     };
     
-    const isBattlePhase = gamePhase === GamePhase.BATTLE || gamePhase === GamePhase.GAMEOVER;
+    const getBackground = () => {
+        switch (gamePhase) {
+            case GamePhase.BATTLE:
+            case GamePhase.GAMEOVER:
+                return <BattleBackground />;
+            case GamePhase.HUB:
+            case GamePhase.SELECT:
+            case GamePhase.DIFFICULTY_SELECT:
+            case GamePhase.LEARNING:
+            default:
+                return <HomeScreenBackground />;
+        }
+    }
 
     return (
-        <main 
-            className="text-white min-h-screen w-screen flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden"
-        >
-            <style>{`
-                .glowing-border {
-                    border-radius: 0.75rem;
-                }
-                .glowing-border::before,
-                .glowing-border::after {
-                    content: '';
-                    position: absolute;
-                    left: -2px;
-                    top: -2px;
-                    background: linear-gradient(45deg, #e6fb04, #ff6600, #00ff66, #00ffff, #ff00ff, #ff0099, #6e0dd0, #00ffff, #e6fb04);
-                    background-size: 400%;
-                    width: calc(100% + 4px);
-                    height: calc(100% + 4px);
-                    z-index: -1;
-                    animation: glow 20s linear infinite;
-                    border-radius: 0.75rem;
-                }
-                @keyframes glow {
-                    0% { background-position: 0 0; }
-                    50% { background-position: 400% 0; }
-                    100% { background-position: 0 0; }
-                }
-                .glowing-border::after {
-                    filter: blur(20px);
-                }
-            `}</style>
-           {isBattlePhase ? <BattleBackground /> : <HomeScreenBackground />}
-           <div className="relative z-10 w-full h-full flex flex-col items-center justify-center">
-             {renderContent()}
-           </div>
+        <main className="relative font-sans min-h-screen w-screen bg-slate-900 text-white">
+            {getBackground()}
+            <div className="relative z-10 w-full min-h-screen flex flex-col items-center justify-center p-4">
+                {renderContent()}
+            </div>
         </main>
     );
 };
-
+// FIX: Add default export for App component
 export default App;
