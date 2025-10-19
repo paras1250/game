@@ -151,6 +151,31 @@ const colorMap: { [key: string]: string } = {
     red: '#ef4444'
 };
 
+interface CharacterStatusProps {
+  character: Character;
+  health: number;
+  maxHealth: number;
+  healthBarColor: string;
+}
+
+const CharacterStatus: React.FC<CharacterStatusProps> = ({ character, health, maxHealth, healthBarColor }) => {
+    const characterColor = colorMap[character.color] || '#ffffff';
+    
+    return (
+        <div className="relative w-full max-w-xs mx-auto h-8">
+            <HealthBar health={health} maxHealth={maxHealth} color={healthBarColor} />
+            <h2 
+                className="absolute inset-0 flex items-center justify-center text-xl md:text-2xl font-bold text-white pointer-events-none drop-shadow-lg"
+                style={{
+                    color: characterColor,
+                    textShadow: `0 0 5px #000, 0 0 8px ${characterColor}`
+                }}
+            >
+                {character.name}
+            </h2>
+        </div>
+    );
+};
 
 const App: React.FC = () => {
     const [isIntro, setIsIntro] = useState(true);
@@ -333,6 +358,13 @@ const App: React.FC = () => {
                  setIsPlayerTurn(false);
             }
         }, 500);
+    };
+
+    const handleSkipPuzzle = () => {
+        audioService.playSound(SoundType.CLICK);
+        setCurrentPuzzle(null);
+        setTurnMessage("Turn skipped. Opponent is preparing to attack.");
+        setIsPlayerTurn(false);
     };
     
     const handleToggleMute = () => {
@@ -569,45 +601,58 @@ const App: React.FC = () => {
         if ((gamePhase === GamePhase.BATTLE || gamePhase === GamePhase.GAMEOVER) && player && opponent) {
              const platformColor = (character: Character) => colorMap[character.color] || '#ffffff';
             return (
-                <div className="flex flex-col h-full w-full relative z-10">
-                    {currentPuzzle && <CodingChallengeModal puzzle={currentPuzzle} onSolve={handleSolvePuzzle} onFail={handleFailPuzzle} solvedPuzzleIds={solvedPuzzleIds} difficulty={difficulty} />}
+                <div className="flex flex-col h-full w-full relative z-10 p-4">
+                    {currentPuzzle && <CodingChallengeModal puzzle={currentPuzzle} onSolve={handleSolvePuzzle} onFail={handleFailPuzzle} onSkip={handleSkipPuzzle} solvedPuzzleIds={solvedPuzzleIds} difficulty={difficulty} />}
                     {failedPuzzle && <PuzzleResultModal puzzle={failedPuzzle} onDismiss={() => setFailedPuzzle(null)} />}
                     {showBuggyEffect && <BuggyEffectOverlay />}
                     
-                    <div className="absolute top-4 left-4 right-4 flex justify-between z-30">
-                       <button onClick={handleReturnToHub} className="px-4 py-2 text-sm font-bold text-white bg-red-600/80 rounded-lg hover:bg-red-700/80 backdrop-blur-sm transition-colors">
+                    {/* Top Header */}
+                    <div className="absolute top-4 left-4 right-4 flex justify-between items-center z-30 gap-4">
+                       <button onClick={handleReturnToHub} className="px-4 py-2 text-md font-bold text-white bg-red-600 rounded-lg hover:bg-red-500 transition-colors shadow-md">
                             Exit
                        </button>
-                       <button onClick={handleToggleMute} className="px-3 py-2 text-sm font-bold text-white bg-blue-600/80 rounded-lg hover:bg-blue-700/80 backdrop-blur-sm transition-colors">
+                       <div className="flex-1">
+                           <CharacterStatus 
+                                character={opponent}
+                                health={opponentHealth}
+                                maxHealth={GAME_CONSTANTS.OPPONENT_MAX_HEALTH}
+                                healthBarColor="bg-green-500"
+                            />
+                       </div>
+                       <button onClick={handleToggleMute} className="w-12 h-10 flex items-center justify-center text-white bg-blue-600 rounded-lg hover:bg-blue-500 transition-colors shadow-md">
                            {isMuted ? 
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.093.707z" clipRule="evenodd" /></svg>
-                           : <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.093.707zm5.828 9.9a1 1 0 01-1.414-1.414L15.586 10l-1.79-1.79a1 1 0 011.413-1.414L17 8.586l1.79-1.79a1 1 0 011.414 1.414L18.414 10l1.79 1.79a1 1 0 01-1.414 1.414L17 11.414l-1.79 1.79z" clipRule="evenodd" /></svg>
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.093.707zm5.828 9.9a1 1 0 01-1.414-1.414L15.586 10l-1.79-1.79a1 1 0 011.413-1.414L17 8.586l1.79-1.79a1 1 0 011.414 1.414L18.414 10l1.79 1.79a1 1 0 01-1.414 1.414L17 11.414l-1.79 1.79z" clipRule="evenodd" /></svg>
+                           : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.093.707z" clipRule="evenodd" /></svg>
                            }
                        </button>
                     </div>
 
-                    <div className="flex-1 w-full flex flex-col md:flex-row justify-around items-center px-2 md:px-8 gap-8 md:gap-0">
-                        {/* Player */}
-                        <div className="flex flex-col items-center relative">
-                             <h2 className="text-2xl md:text-3xl font-bold mb-2 text-cyan-300" style={{ textShadow: '0 0 8px #22d3ee' }}>{player.name}</h2>
-                             <div className="w-64 md:w-80"><HealthBar health={playerHealth} maxHealth={GAME_CONSTANTS.PLAYER_MAX_HEALTH} color="bg-green-500" /></div>
-                             <div className="mt-4 relative flex items-center justify-center">
-                                <BattleCharacter character={player} animation={playerAnimation} />
-                                <HexPlatform color={platformColor(player)} />
-                             </div>
-                        </div>
+                    {/* Main battle area */}
+                    <div className="flex-1 w-full flex flex-col justify-around items-center pt-20 pb-28">
                         {/* Opponent */}
-                        <div className="flex flex-col items-center relative">
-                             <h2 className="text-2xl md:text-3xl font-bold mb-2 text-red-400" style={{ textShadow: '0 0 8px #ef4444' }}>{opponent.name}</h2>
-                             <div className="w-64 md:w-80"><HealthBar health={opponentHealth} maxHealth={GAME_CONSTANTS.OPPONENT_MAX_HEALTH} color="bg-red-500" /></div>
-                             <div className="mt-4 relative flex items-center justify-center">
+                        <div className="flex flex-col items-center relative text-center">
+                             <div className="relative flex items-center justify-center">
                                 <BattleCharacter character={opponent} animation={opponentAnimation} isOpponent />
                                 <HexPlatform color={platformColor(opponent)} />
                              </div>
                         </div>
+                        {/* Player */}
+                        <div className="flex flex-col items-center relative text-center">
+                             <div className="mb-2 relative flex items-center justify-center">
+                                <BattleCharacter character={player} animation={playerAnimation} />
+                                <HexPlatform color={platformColor(player)} />
+                             </div>
+                             <CharacterStatus 
+                                character={player}
+                                health={playerHealth}
+                                maxHealth={GAME_CONSTANTS.PLAYER_MAX_HEALTH}
+                                healthBarColor="bg-red-500"
+                             />
+                        </div>
                     </div>
 
-                    <div className="relative z-20 pb-4 w-full">
+                    {/* Attack/Status Footer */}
+                    <div className="absolute bottom-4 left-4 right-4 z-20">
                         <div className="max-w-md md:max-w-3xl mx-auto bg-black/50 backdrop-blur-sm border-2 border-gray-600/70 p-3 rounded-xl shadow-lg w-full">
                            <div className="h-20 flex flex-col items-center justify-center text-center px-4">
                              <p className="text-lg md:text-xl font-bold text-yellow-300 mb-2">{turnMessage}</p>
@@ -647,9 +692,9 @@ const App: React.FC = () => {
     }
 
     return (
-        <main className="relative font-sans min-h-screen w-screen bg-slate-900 text-white">
+        <main className="relative font-sans min-h-screen w-screen bg-slate-900 text-white overflow-hidden">
             {getBackground()}
-            <div className="relative z-10 w-full min-h-screen flex flex-col items-center justify-center p-4">
+            <div className="relative z-10 w-full min-h-screen flex flex-col items-center justify-center">
                 {renderContent()}
             </div>
         </main>

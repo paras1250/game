@@ -10,6 +10,7 @@ interface CodingChallengeModalProps {
   puzzle: Puzzle;
   onSolve: () => void;
   onFail: () => void;
+  onSkip: () => void;
   solvedPuzzleIds: Set<number>;
   // FIX: Add difficulty to props to determine timer length
   difficulty: Difficulty;
@@ -37,7 +38,7 @@ const SpinnerIcon = () => (
 );
 
 // FIX: Destructure difficulty from props
-const CodingChallengeModal: React.FC<CodingChallengeModalProps> = ({ puzzle, onSolve, onFail, solvedPuzzleIds, difficulty }) => {
+const CodingChallengeModal: React.FC<CodingChallengeModalProps> = ({ puzzle, onSolve, onFail, onSkip, solvedPuzzleIds, difficulty }) => {
   const [answer, setAnswer] = useState('');
   // FIX: Initialize timeLeft state with the correct numeric value based on difficulty
   const [timeLeft, setTimeLeft] = useState(GAME_CONSTANTS.PUZZLE_TIMER_SECONDS[difficulty]);
@@ -135,7 +136,7 @@ const CodingChallengeModal: React.FC<CodingChallengeModalProps> = ({ puzzle, onS
             .animate-fade-in { animation: fade-in 0.5s ease-out forwards; }
         `}</style>
       <div className="relative bg-gray-900 border-4 border-fuchsia-500 rounded-xl shadow-2xl shadow-fuchsia-500/50 p-6 md:p-8 w-11/12 max-w-2xl text-center">
-        <button onClick={onFail} className="absolute top-2 right-2 text-gray-400 hover:text-white transition-colors z-10 p-2" aria-label="Exit puzzle">
+        <button onClick={onSkip} className="absolute top-2 right-2 text-gray-400 hover:text-white transition-colors z-10 p-2" aria-label="Exit puzzle">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -181,7 +182,7 @@ const CodingChallengeModal: React.FC<CodingChallengeModalProps> = ({ puzzle, onS
                         {isHintLoading ? <SpinnerIcon /> : <LightbulbIcon />}
                         Get a Hint
                     </button>
-                    <button type="button" onClick={onFail} className="px-4 py-1 text-sm font-semibold text-gray-400 bg-transparent border border-gray-600 rounded-lg hover:bg-gray-700 hover:text-white transition-colors">
+                    <button type="button" onClick={onSkip} className="px-4 py-1 text-sm font-semibold text-gray-400 bg-transparent border border-gray-600 rounded-lg hover:bg-gray-700 hover:text-white transition-colors">
                         Skip Puzzle
                     </button>
                 </div>
